@@ -762,5 +762,82 @@ remove_sync_container
 wait
 pass
 
+# Test submodules depth syncing
+testcase "submodule-sync-depth"
+
+# Init submodule repo
+SUBMODULE_REPO_NAME="sub"
+SUBMODULE="$DIR/$SUBMODULE_REPO_NAME"
+mkdir "$SUBMODULE"
+
+git -C "$SUBMODULE" init > /dev/null
+
+# First sync
+expected_depth="1"
+echo "$TESTCASE 1" > "$SUBMODULE"/submodule
+git -C "$SUBMODULE" add submodule
+git -C "$SUBMODULE" commit -aqm "submodule $TESTCASE 1"
+git -C "$REPO" submodule -q add $SUBMODULE
+git -C "$REPO" config -f "$REPO"/.gitmodules submodule.$SUBMODULE_REPO_NAME.shallow true
+git -C "$REPO" commit -qam "$TESTCASE 1"
+GIT_SYNC \
+    --logtostderr \
+    --v=5 \
+    --wait=0.1 \
+    --repo="$REPO" \
+    --depth="$expected_depth" \
+    --root="$ROOT" \
+    --dest="link" > "$DIR"/log."$TESTCASE" 2>&1 &
+sleep 3
+assert_link_exists "$ROOT"/link
+assert_file_exists "$ROOT"/link/$SUBMODULE_REPO_NAME/submodule
+assert_file_eq "$ROOT"/link/$SUBMODULE_REPO_NAME/submodule "$TESTCASE 1"
+depth=$(GIT_DIR="$ROOT"/link/.git git log | grep commit | wc -l)
+if [ $expected_depth != $depth ]; then
+    fail "initial depth mismatch expected=$expected_depth actual=$depth"
+fi
+submodule_depth=$(GIT_DIR="$ROOT"/link/$SUBMODULE_REPO_NAME/.git git log | grep commit | wc -l)
+if [ $expected_depth != $submodule_depth ]; then
+    fail "initial submodule depth mismatch expected=$expected_depth actual=$submodule_depth"
+fi
+# Move forward
+echo "$TESTCASE 2" > "$SUBMODULE"/submodule
+git -C "$SUBMODULE" commit -aqm "submodule $TESTCASE 2"
+git -C "$REPO" submodule update --recursive --remote > /dev/null 2>&1
+git -C "$REPO" commit -qam "$TESTCASE 2"
+sleep 3
+assert_link_exists "$ROOT"/link
+assert_file_exists "$ROOT"/link/$SUBMODULE_REPO_NAME/submodule
+assert_file_eq "$ROOT"/link/$SUBMODULE_REPO_NAME/submodule "$TESTCASE 2"
+depth=$(GIT_DIR="$ROOT"/link/.git git log | grep commit | wc -l)
+if [ $expected_depth != $depth ]; then
+    fail "forward depth mismatch expected=$expected_depth actual=$depth"
+fi
+submodule_depth=$(GIT_DIR="$ROOT"/link/$SUBMODULE_REPO_NAME/.git git log | grep commit | wc -l)
+if [ $expected_depth != $submodule_depth ]; then
+    fail "forward submodule depth mismatch expected=$expected_depth actual=$submodule_depth"
+fi
+# Move backward
+git -C "$SUBMODULE" reset -q --hard HEAD^
+git -C "$REPO" submodule -q update --recursive --remote
+git -C "$REPO" commit -qam "$TESTCASE 3"
+sleep 3
+assert_link_exists "$ROOT"/link
+assert_file_exists "$ROOT"/link/$SUBMODULE_REPO_NAME/submodule
+assert_file_eq "$ROOT"/link/$SUBMODULE_REPO_NAME/submodule "$TESTCASE 1"
+depth=$(GIT_DIR="$ROOT"/link/.git git log | grep commit | wc -l)
+if [ $expected_depth != $depth ]; then
+    fail "initial depth mismatch expected=$expected_depth actual=$depth"
+fi
+submodule_depth=$(GIT_DIR="$ROOT"/link/$SUBMODULE_REPO_NAME/.git git log | grep commit | wc -l)
+if [ $expected_depth != $submodule_depth ]; then
+    fail "initial submodule depth mismatch expected=$expected_depth actual=$submodule_depth"
+fi
+# Wrap up
+rm -rf $SUBMODULE
+remove_sync_container
+wait
+pass
+
 echo "cleaning up $DIR"
 rm -rf "$DIR"
